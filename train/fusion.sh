@@ -1,0 +1,18 @@
+python train.py \
+--name painter \
+--gpu_ids 0 \
+--model fusion \
+--dataset_mode face \
+--dataroot /home/chenwendi/CelebAMask-HQ \
+--num_threads 8 \
+--preprocess crop \
+--crop_size 32 \
+--batch_size 32 \
+--display_freq 25 \
+--print_freq 25 \
+--lr 1e-4 \
+--init_type normal \
+--n_epochs 200 \
+--n_epochs_decay 20 \
+--max_dataset_size 6144 \
+--save_epoch_freq 1

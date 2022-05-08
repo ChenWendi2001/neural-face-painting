@@ -1,3 +1,4 @@
+from matplotlib.pyplot import axis
 import torch
 import numpy as np
 from .base_model import BaseModel
@@ -7,7 +8,7 @@ from scipy.optimize import linear_sum_assignment
 from PIL import Image
 
 
-class PainterModel(BaseModel):
+class FusionModel(BaseModel):
 
     @staticmethod
     def modify_commandline_options(parser, is_train=True):
@@ -21,11 +22,12 @@ class PainterModel(BaseModel):
         parser.add_argument('--lambda_gt', type=float, default=1.0, help='weight for ground-truth loss')
         parser.add_argument('--lambda_decision', type=float, default=10.0, help='weight for stroke decision loss')
         parser.add_argument('--lambda_recall', type=float, default=10.0, help='weight of recall for stroke decision loss')
+        parser.add_argument('--lambda_stroke', type=float, default=0.01, help='weight for w loss of stroke shape')
         return parser
 
     def __init__(self, opt):
         BaseModel.__init__(self, opt)
-        self.loss_names = ['pixel', 'gt', 'w', 'decision']
+        self.loss_names = ['pixel', 'gt', 'w', 'decision', 'stroke']
         self.visual_names = ['old', 'render', 'rec']
         self.model_names = ['g']
         self.d = 12  # xc, yc, w, h, theta, R0, G0, B0, R2, G2, B2, A
@@ -44,9 +46,11 @@ class PainterModel(BaseModel):
         brush_large_horizontal = read_img('brush/brush_large_horizontal.png', 'L').to(self.device)
         self.meta_brushes = torch.cat(
             [brush_large_vertical, brush_large_horizontal], dim=0)
-        net_g = networks.Painter(self.d_shape, opt.used_strokes, opt.ngf,
+        self.net_g = networks.Painter(self.d_shape, opt.used_strokes, opt.ngf,
                                  n_enc_layers=opt.num_blocks, n_dec_layers=opt.num_blocks)
-        self.net_g = networks.init_net(net_g, opt.init_type, opt.init_gain, self.gpu_ids)
+        self.net_g.load_state_dict(torch.load("model.pth"))
+        self.net_g.to(self.gpu_ids[0])
+        self.net_g = torch.nn.DataParallel(self.net_g, self.gpu_ids)
         self.old = None
         self.render = None
         self.rec = None
@@ -59,6 +63,7 @@ class PainterModel(BaseModel):
         self.loss_gt = torch.tensor(0., device=self.device)
         self.loss_w = torch.tensor(0., device=self.device)
         self.loss_decision = torch.tensor(0., device=self.device)
+        self.loss_stroke = torch.tensor(0., device=self.device)
         self.criterion_pixel = torch.nn.L1Loss().to(self.device)
         self.criterion_decision = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor(opt.lambda_recall)).to(self.device)
         if self.isTrain:
@@ -100,7 +105,7 @@ class PainterModel(BaseModel):
         return brush, alphas
 
     def set_input(self, input_dict):
-        self.image_paths = input_dict['A_paths']
+        # self.image_paths = input_dict['A_paths']
         with torch.no_grad():
             old_param = torch.rand(self.opt.batch_size // 4, self.opt.used_strokes, self.d, device=self.device)
             old_param[:, :, :4] = old_param[:, :, :4] * 0.5 + 0.2
@@ -146,6 +151,11 @@ class PainterModel(BaseModel):
                 decision = gt_decision[:, i].view(self.opt.batch_size, 1, 1, 1).contiguous()
                 self.render = foreground * alpha * decision + self.render * (1 - alpha * decision)
             self.gt_decision = gt_decision
+        
+        img = input_dict['img'].cuda()
+        self.render = torch.cat([self.render, img], dim=0)
+        self.old = torch.cat([self.old, torch.zeros_like(img)], dim=0)
+        self.hog = input_dict['hog'].cuda()
 
     def forward(self):
         param, decisions = self.net_g(self.render, self.old)
@@ -207,9 +217,44 @@ class PainterModel(BaseModel):
             trace_12[..., 0, 0] * trace_12[..., 1, 1] - trace_12[..., 0, 1] * trace_12[..., 1, 0]))
         return torch.sum((mu_1 - mu_2) ** 2, dim=-1) + trace_1 + trace_2 - 2 * trace_12
 
+    def criterion_stroke(self, stroke, hog):
+        with torch.no_grad():
+            x = stroke[:, :, 0] * self.patch_size
+            y = stroke[:, :, 1] * self.patch_size
+            x = x.long()
+            y = y.long()
+        
+            selected_hog = torch.zeros([x.shape[0], x.shape[1], hog.shape[-1]]).to(x.device)
+            for i in range(x.shape[0]):
+                selected_hog[i, :, :] = hog[i, y[i], x[i], :]
+            selected_hog = selected_hog.reshape(-1, hog.shape[-1])
+
+        w = stroke[:,:,2].flatten()
+        h = stroke[:,:,3].flatten()
+        theta = stroke[:,:,4].flatten()
+
+        temp = selected_hog[h>w,:6]
+        selected_hog[h>w, :6] = selected_hog[h>w, 6:]
+        selected_hog[h>w, 6:] = temp
+
+        selected_hog, angle = torch.min(selected_hog, dim=1)
+        angle = angle / 12
+        angle = angle - theta
+        
+        # angle = torch.arange(12).to(x.device) / 12
+        # angle = angle.unsqueeze(0)
+        # angle = angle - theta
+
+        cos_angle = torch.cos(torch.acos(torch.tensor(-1., device=x.device)) * angle)
+        weighted_cos_angle = cos_angle * 1
+        loss = - torch.sum(weighted_cos_angle)
+
+        return loss
+
     def optimize_parameters(self):
         self.forward()
-        self.loss_pixel = self.criterion_pixel(self.rec, self.render) * self.opt.lambda_pixel
+        self.loss_pixel = self.criterion_pixel(self.rec[:self.opt.batch_size], self.render[:self.opt.batch_size]) * self.opt.lambda_pixel
+        self.loss_stroke = self.criterion_stroke(self.pred_param[self.opt.batch_size:], self.hog) * self.opt.lambda_stroke
         cur_valid_gt_size = 0
         with torch.no_grad():
             r_idx = []
@@ -235,13 +280,13 @@ class PainterModel(BaseModel):
             paired_gt_decision[r_idx] = 1.
         all_valid_gt_param = self.gt_param[self.gt_decision.bool(), :]
         all_pred_param = self.pred_param.view(-1, self.pred_param.shape[2]).contiguous()
-        all_pred_decision = self.pred_decision.view(-1).contiguous()
+        all_pred_decision = self.pred_decision[:self.opt.batch_size].view(-1).contiguous()
         paired_gt_param = all_valid_gt_param[c_idx, :]
         paired_pred_param = all_pred_param[r_idx, :]
         self.loss_gt = self.criterion_pixel(paired_pred_param, paired_gt_param) * self.opt.lambda_gt
         self.loss_w = self.gaussian_w_distance(paired_pred_param, paired_gt_param).mean() * self.opt.lambda_w
         self.loss_decision = self.criterion_decision(all_pred_decision, paired_gt_decision) * self.opt.lambda_decision
-        loss = self.loss_pixel + self.loss_gt + self.loss_w + self.loss_decision
+        loss = self.loss_pixel + self.loss_gt + self.loss_w + self.loss_decision + self.loss_stroke
         loss.backward()
         self.optimizer.step()
         self.optimizer.zero_grad()
