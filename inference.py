@@ -62,19 +62,22 @@ def param2stroke(param, H, W, meta_brushes):
     warp_1 = torch.stack([warp_10, warp_11, warp_12], dim=1)
     warp = torch.stack([warp_0, warp_1], dim=1)
     # Conduct warping.
-    grid = F.affine_grid(warp, [b, 3, H, W], align_corners=False)
-    brush = F.grid_sample(brush, grid, align_corners=False)
+    brush = F.grid_sample(
+        brush, F.affine_grid(warp, [b, 3, H, W], align_corners=False), align_corners=False)
     # alphas is the binary information suggesting whether a pixel is belonging to the stroke.
-    alphas = (brush > 0).float()
-    brush = brush.repeat(1, 3, 1, 1)
-    alphas = alphas.repeat(1, 3, 1, 1)
-    # Give color to foreground strokes.
-    color_map = torch.cat([R, G, B], dim=1)
-    color_map = color_map.unsqueeze(-1).unsqueeze(-1).repeat(1, 1, H, W)
-    foreground = brush * color_map
     # Dilation and erosion are used for foregrounds and alphas respectively to prevent artifacts on stroke borders.
-    foreground = morphology.dilation(foreground)
-    alphas = morphology.erosion(alphas)
+    # print(torch.cuda.memory_summary())
+    alphas = morphology.erosion(
+        (brush > 0).to(torch.float16).repeat(1, 3, 1, 1))
+    # print(torch.cuda.memory_summary())
+    # Give color to foreground strokes.
+    # color_map = torch.cat(
+    #     [R, G, B], dim=1).view(8, 3, 1, 1).repeat(1, 1, H, W)
+    # Dilation and erosion are used for foregrounds and alphas respectively to prevent artifacts on stroke borders.
+    foreground = morphology.dilation(
+        brush.repeat(1, 3, 1, 1) * torch.cat(
+            [R, G, B], dim=1).unsqueeze(-1).unsqueeze(-1).repeat(1, 1, H, W))
+    # print(torch.cuda.memory_summary())
     return foreground, alphas
 
 
@@ -98,7 +101,7 @@ def param2img_parallel(param, decision, meta_brushes, cur_canvas):
         """
     # param: b, h, w, stroke_per_patch, param_per_stroke
     # decision: b, h, w, stroke_per_patch
-    b, h, w, s, p = param.shape
+    b, h, w, s, _ = param.shape
     param = param.view(-1, 8).contiguous()
     decision = decision.view(-1).contiguous().bool()
     H, W = cur_canvas.shape[-2:]
@@ -116,8 +119,13 @@ def param2img_parallel(param, decision, meta_brushes, cur_canvas):
     odd_y_even_x_coord_y, odd_y_even_x_coord_x = torch.meshgrid([odd_idx_y, even_idx_x])
     cur_canvas = F.pad(cur_canvas, [patch_size_x // 4, patch_size_x // 4,
                                     patch_size_y // 4, patch_size_y // 4, 0, 0, 0, 0])
-    foregrounds = torch.zeros(param.shape[0], 3, patch_size_y, patch_size_x, device=cur_canvas.device)
-    alphas = torch.zeros(param.shape[0], 3, patch_size_y, patch_size_x, device=cur_canvas.device)
+    foregrounds = torch.zeros(
+        param.shape[0], 3, patch_size_y, patch_size_x,
+        dtype=torch.float16, device=cur_canvas.device)
+    alphas = torch.zeros(
+        param.shape[0], 3, patch_size_y, patch_size_x,
+        dtype=torch.float16, device=cur_canvas.device)
+    # print(torch.cuda.memory_summary())
     valid_foregrounds, valid_alphas = param2stroke(param[decision, :], patch_size_y, patch_size_x, meta_brushes)
     foregrounds[decision, :, :, :] = valid_foregrounds
     alphas[decision, :, :, :] = valid_alphas
@@ -145,8 +153,8 @@ def param2img_parallel(param, decision, meta_brushes, cur_canvas):
             cur_foreground = selected_foregrounds[:, :, :, i, :, :, :]
             cur_alpha = selected_alphas[:, :, :, i, :, :, :]
             cur_decision = selected_decisions[:, :, :, i, :, :, :]
-            selected_canvas_patch = cur_foreground * cur_alpha * cur_decision + selected_canvas_patch * (
-                    1 - cur_alpha * cur_decision)
+            selected_canvas_patch = cur_foreground * cur_alpha * cur_decision + \
+                selected_canvas_patch * (1 - cur_alpha * cur_decision)
         this_canvas = selected_canvas_patch.permute(0, 3, 1, 4, 2, 5).contiguous()
         # this_canvas: b, 3, h_half, py, w_half, px
         h_half = this_canvas.shape[2]
@@ -192,7 +200,7 @@ def param2img_parallel(param, decision, meta_brushes, cur_canvas):
         cur_canvas = canvas
 
     cur_canvas = cur_canvas[:, :, patch_size_y // 4:-patch_size_y // 4, patch_size_x // 4:-patch_size_x // 4]
-
+    # print(torch.cuda.memory_summary())
     return cur_canvas
 
 
@@ -203,21 +211,21 @@ def read_img(img_path, img_type='RGB', h=None, w=None):
     img = np.array(img)
     if img.ndim == 2:
         img = np.expand_dims(img, axis=-1)
-    img = img.transpose((2, 0, 1))
-    img = torch.from_numpy(img).unsqueeze(0).float() / 255.
+    img = img.transpose((2, 0, 1)).astype(np.float16) / 255
+    img = torch.from_numpy(img).unsqueeze(0)
     return img
 
 
-def pad(img, H, W):
+def pad(img: torch.Tensor, H, W):
     b, c, h, w = img.shape
     pad_h = (H - h) // 2
     pad_w = (W - w) // 2
     remainder_h = (H - h) % 2
     remainder_w = (W - w) % 2
-    img = torch.cat([torch.zeros((b, c, pad_h, w), device=img.device), img,
-                     torch.zeros((b, c, pad_h + remainder_h, w), device=img.device)], dim=-2)
-    img = torch.cat([torch.zeros((b, c, H, pad_w), device=img.device), img,
-                     torch.zeros((b, c, H, pad_w + remainder_w), device=img.device)], dim=-1)
+    img = torch.cat([torch.zeros((b, c, pad_h, w), dtype=img.dtype, device=img.device), img,
+                     torch.zeros((b, c, pad_h + remainder_h, w), dtype=img.dtype, device=img.device)], dim=-2)
+    img = torch.cat([torch.zeros((b, c, H, pad_w), dtype=img.dtype, device=img.device), img,
+                     torch.zeros((b, c, H, pad_w + remainder_w), dtype=img.dtype, device=img.device)], dim=-1)
     return img
 
 
@@ -236,10 +244,6 @@ def main(input_path, model_path, output_dir, resize_h=None, resize_w=None):
         os.mkdir(output_dir)
     input_name = os.path.basename(input_path)
     output_path = os.path.join(output_dir, input_name)
-    # frame_dir = None
-    frame_dir = os.path.join(output_dir, input_name[:input_name.find('.')])
-    if not os.path.exists(frame_dir):
-        os.mkdir(frame_dir)
     patch_size = 32
     stroke_num = 8
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -288,11 +292,11 @@ def main(input_path, model_path, output_dir, resize_h=None, resize_w=None):
                 input_img = img_patch[index: last, ...]
                 input_result = result_patch[index: last, ...]
                 output_param, output_decision = \
-                    net_g(input_img, input_result)
+                    net_g(input_img.float(), input_result.float())
                 shape_param[index: last, ...] = output_param
                 stroke_decision[index: last, ...] = output_decision
             # shape_param, stroke_decision = net_g(img_patch, result_patch)
-            shape_param = shape_param.contiguous()
+            shape_param = shape_param.contiguous().to(torch.float16)
             stroke_decision = stroke_decision.contiguous()
             stroke_decision = network.SignWithSigmoidGrad.apply(stroke_decision)
 
@@ -343,11 +347,11 @@ def main(input_path, model_path, output_dir, resize_h=None, resize_w=None):
             input_img = img_patch[index: last, ...]
             input_result = result_patch[index: last, ...]
             output_param, output_decision = \
-                net_g(input_img, input_result)
+                net_g(input_img.float(), input_result.float())
             shape_param[index: last, ...] = output_param
             stroke_decision[index: last, ...] = output_decision
         # shape_param, stroke_decision = net_g(img_patch, result_patch)
-        shape_param = shape_param.contiguous()
+        shape_param = shape_param.contiguous().to(torch.float16)
         stroke_decision = stroke_decision.contiguous()
 
         grid = shape_param[:, :, :2].view(img_patch.shape[0] * stroke_num, 1, 1, 2).contiguous()
