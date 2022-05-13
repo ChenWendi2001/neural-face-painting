@@ -65,19 +65,23 @@ def param2stroke(param, H, W, meta_brushes):
     warp_1 = torch.stack([warp_10, warp_11, warp_12], dim=1)
     warp = torch.stack([warp_0, warp_1], dim=1)
     # Conduct warping.
-    grid = F.affine_grid(warp, [b, 3, H, W], align_corners=False)
-    brush = F.grid_sample(brush, grid, align_corners=False)
+    brush = F.grid_sample(
+        brush, F.affine_grid(warp, [b, 3, H, W],
+                             align_corners=False), align_corners=False)
     # alphas is the binary information suggesting whether a pixel is belonging to the stroke.
-    alphas = (brush > 0).float()
-    brush = brush.repeat(1, 3, 1, 1)
-    alphas = alphas.repeat(1, 3, 1, 1)
-    # Give color to foreground strokes.
-    color_map = torch.cat([R, G, B], dim=1)
-    color_map = color_map.unsqueeze(-1).unsqueeze(-1).repeat(1, 1, H, W)
-    foreground = brush * color_map
     # Dilation and erosion are used for foregrounds and alphas respectively to prevent artifacts on stroke borders.
-    foreground = morphology.dilation(foreground)
-    alphas = morphology.erosion(alphas)
+    # print(torch.cuda.memory_summary())
+    alphas = morphology.erosion(
+        (brush > 0).to(torch.float16).repeat(1, 3, 1, 1))
+    # print(torch.cuda.memory_summary())
+    # Give color to foreground strokes.
+    # color_map = torch.cat(
+    #     [R, G, B], dim=1).view(8, 3, 1, 1).repeat(1, 1, H, W)
+    # Dilation and erosion are used for foregrounds and alphas respectively to prevent artifacts on stroke borders.
+    foreground = morphology.dilation(
+        brush.repeat(1, 3, 1, 1) * torch.cat(
+            [R, G, B], dim=1).unsqueeze(-1).unsqueeze(-1).repeat(1, 1, H, W))
+    # print(torch.cuda.memory_summary())
     return foreground, alphas
 
 
@@ -101,7 +105,7 @@ def param2img_parallel(param, decision, meta_brushes, cur_canvas):
         """
     # param: b, h, w, stroke_per_patch, param_per_stroke
     # decision: b, h, w, stroke_per_patch
-    b, h, w, s, p = param.shape
+    b, h, w, s, _ = param.shape
     param = param.view(-1, 8).contiguous()
     decision = decision.view(-1).contiguous().bool()
     H, W = cur_canvas.shape[-2:]
@@ -113,32 +117,34 @@ def param2img_parallel(param, decision, meta_brushes, cur_canvas):
     even_idx_x = torch.arange(0, w, 2, device=cur_canvas.device)
     odd_idx_y = torch.arange(1, h, 2, device=cur_canvas.device)
     odd_idx_x = torch.arange(1, w, 2, device=cur_canvas.device)
-    even_y_even_x_coord_y, even_y_even_x_coord_x = torch.meshgrid(
-        [even_idx_y, even_idx_x])
-    odd_y_odd_x_coord_y, odd_y_odd_x_coord_x = torch.meshgrid(
-        [odd_idx_y, odd_idx_x])
-    even_y_odd_x_coord_y, even_y_odd_x_coord_x = torch.meshgrid(
-        [even_idx_y, odd_idx_x])
-    odd_y_even_x_coord_y, odd_y_even_x_coord_x = torch.meshgrid(
-        [odd_idx_y, even_idx_x])
+    even_y_even_x_coord_y, even_y_even_x_coord_x = \
+        torch.meshgrid([even_idx_y, even_idx_x])
+    odd_y_odd_x_coord_y, odd_y_odd_x_coord_x = \
+        torch.meshgrid([odd_idx_y, odd_idx_x])
+    even_y_odd_x_coord_y, even_y_odd_x_coord_x = \
+        torch.meshgrid([even_idx_y, odd_idx_x])
+    odd_y_even_x_coord_y, odd_y_even_x_coord_x = \
+        torch.meshgrid([odd_idx_y, even_idx_x])
     cur_canvas = F.pad(cur_canvas, [patch_size_x // 4, patch_size_x // 4,
                                     patch_size_y // 4, patch_size_y // 4, 0, 0, 0, 0])
     foregrounds = torch.zeros(
-        param.shape[0], 3, patch_size_y, patch_size_x, device=cur_canvas.device)
+        param.shape[0], 3, patch_size_y, patch_size_x,
+        dtype=torch.float16, device=cur_canvas.device)
     alphas = torch.zeros(
-        param.shape[0], 3, patch_size_y, patch_size_x, device=cur_canvas.device)
+        param.shape[0], 3, patch_size_y, patch_size_x,
+        dtype=torch.float16, device=cur_canvas.device)
+    # print(torch.cuda.memory_summary())
     valid_foregrounds, valid_alphas = param2stroke(
         param[decision, :], patch_size_y, patch_size_x, meta_brushes)
     foregrounds[decision, :, :, :] = valid_foregrounds
     alphas[decision, :, :, :] = valid_alphas
     # foreground, alpha: b * h * w * stroke_per_patch, 3, patch_size_y, patch_size_x
-    foregrounds = foregrounds.view(-1, h, w, s,
-                                   3, patch_size_y, patch_size_x).contiguous()
-    alphas = alphas.view(-1, h, w, s, 3, patch_size_y,
-                         patch_size_x).contiguous()
+    foregrounds = foregrounds.view(
+        -1, h, w, s, 3, patch_size_y, patch_size_x).contiguous()
+    alphas = alphas.view(
+        -1, h, w, s, 3, patch_size_y, patch_size_x).contiguous()
     # foreground, alpha: b, h, w, stroke_per_patch, 3, render_size_y, render_size_x
     decision = decision.view(-1, h, w, s, 1, 1, 1).contiguous()
-
     # decision: b, h, w, stroke_per_patch, 1, 1, 1
 
     def partial_render(this_canvas, patch_coord_y, patch_coord_x):
@@ -227,7 +233,7 @@ def param2img_parallel(param, decision, meta_brushes, cur_canvas):
 
     cur_canvas = cur_canvas[:, :, patch_size_y // 4:-
                             patch_size_y // 4, patch_size_x // 4:-patch_size_x // 4]
-
+    # print(torch.cuda.memory_summary())
     return cur_canvas
 
 
@@ -238,8 +244,8 @@ def read_img(img_path, img_type='RGB', h=None, w=None):
     img = np.array(img)
     if img.ndim == 2:
         img = np.expand_dims(img, axis=-1)
-    img = img.transpose((2, 0, 1))
-    img = torch.from_numpy(img).unsqueeze(0).float() / 255.
+    img = img.transpose((2, 0, 1)).astype(np.float16) / 255
+    img = torch.from_numpy(img).unsqueeze(0)
     return img
 
 
@@ -264,29 +270,29 @@ def render(strokes, original_h, original_w):
     meta_brushes = torch.cat(
         [brush_large_vertical, brush_large_horizontal], dim=0)
 
-    with torch.no_grad():
-        K = max(math.ceil(math.log2(max(original_h, original_w) / patch_size)), 0)
-        original_img_pad_size = patch_size * (2 ** K)
-        final_result = torch.zeros((original_img_pad_size, ) * 2).to(device)
-        print(f"[INFO]: {K + 1} layers")
-        for layer in tqdm(range(0, K + 1)):
-            param, decision, meta_brushes, final_result = strokes[layer]
-            final_result = param2img_parallel(
-                param, decision, meta_brushes, final_result)
-
-        layer_size = patch_size * (2 ** (K + 1))
-        # There are patch_num * patch_num patches in total
-        patch_num = (layer_size - patch_size) // patch_size + 1
-        border_size = original_img_pad_size // (2 * patch_num)
-        final_result = F.pad(
-            final_result, [border_size, border_size, border_size, border_size, 0, 0, 0, 0])
-        param, decision, meta_brushes, final_result = strokes[-1]
+    # with torch.no_grad():
+    K = max(math.ceil(math.log2(max(original_h, original_w) / patch_size)), 0)
+    original_img_pad_size = patch_size * (2 ** K)
+    final_result = torch.zeros((original_img_pad_size, ) * 2).to(device)
+    print(f"[INFO]: {K + 1} layers")
+    for layer in tqdm(range(0, K + 1)):
+        param, decision, meta_brushes, final_result = strokes[layer]
         final_result = param2img_parallel(
             param, decision, meta_brushes, final_result)
-        final_result = final_result[:, :, border_size:-
-                                    border_size, border_size:-border_size]
-        final_result = crop(final_result, original_h, original_w)
-        return final_result[0]
+
+    layer_size = patch_size * (2 ** (K + 1))
+    # There are patch_num * patch_num patches in total
+    patch_num = (layer_size - patch_size) // patch_size + 1
+    border_size = original_img_pad_size // (2 * patch_num)
+    final_result = F.pad(
+        final_result, [border_size, border_size, border_size, border_size, 0, 0, 0, 0])
+    param, decision, meta_brushes, final_result = strokes[-1]
+    final_result = param2img_parallel(
+        param, decision, meta_brushes, final_result)
+    final_result = final_result[:, :, border_size:-
+                                border_size, border_size:-border_size]
+    final_result = crop(final_result, original_h, original_w)
+    return final_result[0]
 
 
 if __name__ == '__main__':

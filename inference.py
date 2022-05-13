@@ -134,7 +134,6 @@ def param2img_parallel(param, decision, meta_brushes, cur_canvas):
     alphas = alphas.view(-1, h, w, s, 3, patch_size_y, patch_size_x).contiguous()
     # foreground, alpha: b, h, w, stroke_per_patch, 3, render_size_y, render_size_x
     decision = decision.view(-1, h, w, s, 1, 1, 1).contiguous()
-
     # decision: b, h, w, stroke_per_patch, 1, 1, 1
 
     def partial_render(this_canvas, patch_coord_y, patch_coord_x):
