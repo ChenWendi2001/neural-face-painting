@@ -315,9 +315,10 @@ def main(input_path, model_path, output_dir, resize_h=None, resize_w=None):
             param[..., 2:4] = param[..., 2:4] / 2
 
             # NOTE: save strokes
-            strokes.append((param, decision, meta_brushes, final_result))
+            strokes.append((param, decision))
             final_result = param2img_parallel(
                 param, decision, meta_brushes, final_result)
+            # print(final_result.mean())
 
         border_size = original_img_pad_size // (2 * patch_num)
         img = F.interpolate(original_img_pad, (patch_size * (2 ** layer), patch_size * (2 ** layer)))
@@ -369,7 +370,7 @@ def main(input_path, model_path, output_dir, resize_h=None, resize_w=None):
         param[..., 2:4] = param[..., 2:4] / 2
 
         # NOTE: save strokes
-        strokes.append((param, decision, meta_brushes, final_result))
+        strokes.append((param, decision))
         final_result = param2img_parallel(
             param, decision, meta_brushes, final_result)
 

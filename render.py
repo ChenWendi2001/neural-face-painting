@@ -1,10 +1,12 @@
 import math
 import pickle
+from typing import List, Tuple
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from PIL import Image
+from torch import Tensor
 from tqdm import tqdm
 
 import morphology
@@ -260,7 +262,7 @@ def crop(img, h, w):
     return img
 
 
-def render(strokes, original_h, original_w):
+def render(strokes, original_h, original_w) -> torch.Tensor:
     patch_size = 32
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     brush_large_vertical = read_img(
@@ -273,20 +275,22 @@ def render(strokes, original_h, original_w):
     # with torch.no_grad():
     K = max(math.ceil(math.log2(max(original_h, original_w) / patch_size)), 0)
     original_img_pad_size = patch_size * (2 ** K)
-    final_result = torch.zeros((original_img_pad_size, ) * 2).to(device)
+    final_result = torch.zeros(
+        (1, 3, original_img_pad_size, original_img_pad_size)).to(device)
     print(f"[INFO]: {K + 1} layers")
     for layer in tqdm(range(0, K + 1)):
-        param, decision, meta_brushes, final_result = strokes[layer]
+        param, decision = strokes[layer]
         final_result = param2img_parallel(
             param, decision, meta_brushes, final_result)
+        # print(final_result.mean())
 
-    layer_size = patch_size * (2 ** (K + 1))
+    layer_size = patch_size * (2 ** K)
     # There are patch_num * patch_num patches in total
     patch_num = (layer_size - patch_size) // patch_size + 1
     border_size = original_img_pad_size // (2 * patch_num)
     final_result = F.pad(
         final_result, [border_size, border_size, border_size, border_size, 0, 0, 0, 0])
-    param, decision, meta_brushes, final_result = strokes[-1]
+    param, decision = strokes[-1]
     final_result = param2img_parallel(
         param, decision, meta_brushes, final_result)
     final_result = final_result[:, :, border_size:-
@@ -295,7 +299,28 @@ def render(strokes, original_h, original_w):
     return final_result[0]
 
 
-if __name__ == '__main__':
-    strokes = pickle.load(open("strokes.pkl", "rb"))
-    final_result = render(strokes, original_h=1024, original_w=1024)
+def trainStep(strokes, optimizer):
+    final_result = render(
+        strokes, original_h=1024, original_w=1024)
+    loss = final_result.mean()
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    print(loss.item())
     save_img(final_result, "output.png")
+
+
+if __name__ == '__main__':
+    params = []
+    strokes: List[Tuple[Tensor, Tensor]] = \
+        pickle.load(open("strokes.pkl", "rb"))
+    for stroke in strokes:
+        stroke[0].requires_grad = True
+        params.append(stroke[0])
+    # final_result = render(strokes, original_h=1024, original_w=1024)
+    # save_img(final_result, "output.png")
+
+    # training demo
+    optimizer = torch.optim.SGD(params, lr=0.1)
+    for _ in range(10):
+        trainStep(strokes, optimizer)
