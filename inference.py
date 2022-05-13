@@ -1,15 +1,15 @@
+import math
+import os
 import pickle
+
+import numpy as np
 import torch
 import torch.nn.functional as F
-import numpy as np
 from PIL import Image
-import network
-import morphology
-import os
-import math
 from tqdm import tqdm
 
-idx = 0
+import morphology
+import network
 
 
 def save_img(img, output_path):
@@ -78,35 +78,29 @@ def param2stroke(param, H, W, meta_brushes):
     return foreground, alphas
 
 
-def param2img_serial(
-        param, decision, meta_brushes, cur_canvas, frame_dir, has_border=False, original_h=None, original_w=None):
+def param2img_parallel(param, decision, meta_brushes, cur_canvas):
     """
-    Input stroke parameters and decisions for each patch, meta brushes, current canvas, frame directory,
-    and whether there is a border (if intermediate painting results are required).
-    Output the painting results of adding the corresponding strokes on the current canvas.
-    Args:
-        param: a tensor with shape batch size x patch along height dimension x patch along width dimension
-         x n_stroke_per_patch x n_param_per_stroke
-        decision: a 01 tensor with shape batch size x patch along height dimension x patch along width dimension
-         x n_stroke_per_patch
-        meta_brushes: a tensor with shape 2 x 3 x meta_brush_height x meta_brush_width.
-        The first slice on the batch dimension denotes vertical brush and the second one denotes horizontal brush.
-        cur_canvas: a tensor with shape batch size x 3 x H x W,
-         where H and W denote height and width of padded results of original images.
-        frame_dir: directory to save intermediate painting results. None means intermediate results are not required.
-        has_border: on the last painting layer, in order to make sure that the painting results do not miss
-         any important detail, we choose to paint again on this layer but shift patch_size // 2 pixels when
-         cutting patches. In this case, if intermediate results are required, we need to cut the shifted length
-         on the border before saving, or there would be a black border.
-        original_h: to indicate the original height for cropping when saving intermediate results.
-        original_w: to indicate the original width for cropping when saving intermediate results.
+        Input stroke parameters and decisions for each patch, meta brushes, current canvas, frame directory,
+        and whether there is a border (if intermediate painting results are required).
+        Output the painting results of adding the corresponding strokes on the current canvas.
+        Args:
+            param: a tensor with shape batch size x patch along height dimension x patch along width dimension
+             x n_stroke_per_patch x n_param_per_stroke
+            decision: a 01 tensor with shape batch size x patch along height dimension x patch along width dimension
+             x n_stroke_per_patch
+            meta_brushes: a tensor with shape 2 x 3 x meta_brush_height x meta_brush_width.
+            The first slice on the batch dimension denotes vertical brush and the second one denotes horizontal brush.
+            cur_canvas: a tensor with shape batch size x 3 x H x W,
+             where H and W denote height and width of padded results of original images.
 
-    Returns:
-        cur_canvas: a tensor with shape batch size x 3 x H x W, denoting painting results.
-    """
+        Returns:
+            cur_canvas: a tensor with shape batch size x 3 x H x W, denoting painting results.
+        """
     # param: b, h, w, stroke_per_patch, param_per_stroke
     # decision: b, h, w, stroke_per_patch
     b, h, w, s, p = param.shape
+    param = param.view(-1, 8).contiguous()
+    decision = decision.view(-1).contiguous().bool()
     H, W = cur_canvas.shape[-2:]
     is_odd_y = h % 2 == 1
     is_odd_x = w % 2 == 1
@@ -122,8 +116,21 @@ def param2img_serial(
     odd_y_even_x_coord_y, odd_y_even_x_coord_x = torch.meshgrid([odd_idx_y, even_idx_x])
     cur_canvas = F.pad(cur_canvas, [patch_size_x // 4, patch_size_x // 4,
                                     patch_size_y // 4, patch_size_y // 4, 0, 0, 0, 0])
+    foregrounds = torch.zeros(param.shape[0], 3, patch_size_y, patch_size_x, device=cur_canvas.device)
+    alphas = torch.zeros(param.shape[0], 3, patch_size_y, patch_size_x, device=cur_canvas.device)
+    valid_foregrounds, valid_alphas = param2stroke(param[decision, :], patch_size_y, patch_size_x, meta_brushes)
+    foregrounds[decision, :, :, :] = valid_foregrounds
+    alphas[decision, :, :, :] = valid_alphas
+    # foreground, alpha: b * h * w * stroke_per_patch, 3, patch_size_y, patch_size_x
+    foregrounds = foregrounds.view(-1, h, w, s, 3, patch_size_y, patch_size_x).contiguous()
+    alphas = alphas.view(-1, h, w, s, 3, patch_size_y, patch_size_x).contiguous()
+    # foreground, alpha: b, h, w, stroke_per_patch, 3, render_size_y, render_size_x
+    decision = decision.view(-1, h, w, s, 1, 1, 1).contiguous()
 
-    def partial_render(this_canvas, patch_coord_y, patch_coord_x, stroke_id):
+    # decision: b, h, w, stroke_per_patch, 1, 1, 1
+
+    def partial_render(this_canvas, patch_coord_y, patch_coord_x):
+
         canvas_patch = F.unfold(this_canvas, (patch_size_y, patch_size_x),
                                 stride=(patch_size_y // 2, patch_size_x // 2))
         # canvas_patch: b, 3 * py * px, h * w
@@ -131,91 +138,58 @@ def param2img_serial(
         canvas_patch = canvas_patch.permute(0, 4, 5, 1, 2, 3).contiguous()
         # canvas_patch: b, h, w, 3, py, px
         selected_canvas_patch = canvas_patch[:, patch_coord_y, patch_coord_x, :, :, :]
-        selected_h, selected_w = selected_canvas_patch.shape[1:3]
-        selected_param = param[:, patch_coord_y, patch_coord_x, stroke_id, :].view(-1, p).contiguous()
-        selected_decision = decision[:, patch_coord_y, patch_coord_x, stroke_id].view(-1).contiguous()
-        selected_foregrounds = torch.zeros(selected_param.shape[0], 3, patch_size_y, patch_size_x,
-                                           device=this_canvas.device)
-        selected_alphas = torch.zeros(selected_param.shape[0], 3, patch_size_y, patch_size_x, device=this_canvas.device)
-        if selected_param[selected_decision, :].shape[0] > 0:
-            selected_foregrounds[selected_decision, :, :, :], selected_alphas[selected_decision, :, :, :] = \
-                param2stroke(selected_param[selected_decision, :], patch_size_y, patch_size_x, meta_brushes)
-        selected_foregrounds = selected_foregrounds.view(
-            b, selected_h, selected_w, 3, patch_size_y, patch_size_x).contiguous()
-        selected_alphas = selected_alphas.view(b, selected_h, selected_w, 3, patch_size_y, patch_size_x).contiguous()
-        selected_decision = selected_decision.view(b, selected_h, selected_w, 1, 1, 1).contiguous()
-        selected_canvas_patch = selected_foregrounds * selected_alphas * selected_decision + selected_canvas_patch * (
-                1 - selected_alphas * selected_decision)
+        selected_foregrounds = foregrounds[:, patch_coord_y, patch_coord_x, :, :, :, :]
+        selected_alphas = alphas[:, patch_coord_y, patch_coord_x, :, :, :, :]
+        selected_decisions = decision[:, patch_coord_y, patch_coord_x, :, :, :, :]
+        for i in range(s):
+            cur_foreground = selected_foregrounds[:, :, :, i, :, :, :]
+            cur_alpha = selected_alphas[:, :, :, i, :, :, :]
+            cur_decision = selected_decisions[:, :, :, i, :, :, :]
+            selected_canvas_patch = cur_foreground * cur_alpha * cur_decision + selected_canvas_patch * (
+                    1 - cur_alpha * cur_decision)
         this_canvas = selected_canvas_patch.permute(0, 3, 1, 4, 2, 5).contiguous()
-        # this_canvas: b, 3, selected_h, py, selected_w, px
-        this_canvas = this_canvas.view(b, 3, selected_h * patch_size_y, selected_w * patch_size_x).contiguous()
-        # this_canvas: b, 3, selected_h * py, selected_w * px
+        # this_canvas: b, 3, h_half, py, w_half, px
+        h_half = this_canvas.shape[2]
+        w_half = this_canvas.shape[4]
+        this_canvas = this_canvas.view(b, 3, h_half * patch_size_y, w_half * patch_size_x).contiguous()
+        # this_canvas: b, 3, h_half * py, w_half * px
         return this_canvas
 
-    global idx
-    if has_border:
-        factor = 2
-    else:
-        factor = 4
     if even_idx_y.shape[0] > 0 and even_idx_x.shape[0] > 0:
-        for i in range(s):
-            canvas = partial_render(cur_canvas, even_y_even_x_coord_y, even_y_even_x_coord_x, i)
-            if not is_odd_y:
-                canvas = torch.cat([canvas, cur_canvas[:, :, -patch_size_y // 2:, :canvas.shape[3]]], dim=2)
-            if not is_odd_x:
-                canvas = torch.cat([canvas, cur_canvas[:, :, :canvas.shape[2], -patch_size_x // 2:]], dim=3)
-            cur_canvas = canvas
-            idx += 1
-            if frame_dir is not None:
-                frame = crop(cur_canvas[:, :, patch_size_y // factor:-patch_size_y // factor,
-                             patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
-                save_img(frame[0], os.path.join(frame_dir, '%03d.jpg' % idx))
+        canvas = partial_render(cur_canvas, even_y_even_x_coord_y, even_y_even_x_coord_x)
+        if not is_odd_y:
+            canvas = torch.cat([canvas, cur_canvas[:, :, -patch_size_y // 2:, :canvas.shape[3]]], dim=2)
+        if not is_odd_x:
+            canvas = torch.cat([canvas, cur_canvas[:, :, :canvas.shape[2], -patch_size_x // 2:]], dim=3)
+        cur_canvas = canvas
 
     if odd_idx_y.shape[0] > 0 and odd_idx_x.shape[0] > 0:
-        for i in range(s):
-            canvas = partial_render(cur_canvas, odd_y_odd_x_coord_y, odd_y_odd_x_coord_x, i)
-            canvas = torch.cat([cur_canvas[:, :, :patch_size_y // 2, -canvas.shape[3]:], canvas], dim=2)
-            canvas = torch.cat([cur_canvas[:, :, -canvas.shape[2]:, :patch_size_x // 2], canvas], dim=3)
-            if is_odd_y:
-                canvas = torch.cat([canvas, cur_canvas[:, :, -patch_size_y // 2:, :canvas.shape[3]]], dim=2)
-            if is_odd_x:
-                canvas = torch.cat([canvas, cur_canvas[:, :, :canvas.shape[2], -patch_size_x // 2:]], dim=3)
-            cur_canvas = canvas
-            idx += 1
-            if frame_dir is not None:
-                frame = crop(cur_canvas[:, :, patch_size_y // factor:-patch_size_y // factor,
-                             patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
-                save_img(frame[0], os.path.join(frame_dir, '%03d.jpg' % idx))
+        canvas = partial_render(cur_canvas, odd_y_odd_x_coord_y, odd_y_odd_x_coord_x)
+        canvas = torch.cat([cur_canvas[:, :, :patch_size_y // 2, -canvas.shape[3]:], canvas], dim=2)
+        canvas = torch.cat([cur_canvas[:, :, -canvas.shape[2]:, :patch_size_x // 2], canvas], dim=3)
+        if is_odd_y:
+            canvas = torch.cat([canvas, cur_canvas[:, :, -patch_size_y // 2:, :canvas.shape[3]]], dim=2)
+        if is_odd_x:
+            canvas = torch.cat([canvas, cur_canvas[:, :, :canvas.shape[2], -patch_size_x // 2:]], dim=3)
+        cur_canvas = canvas
 
     if odd_idx_y.shape[0] > 0 and even_idx_x.shape[0] > 0:
-        for i in range(s):
-            canvas = partial_render(cur_canvas, odd_y_even_x_coord_y, odd_y_even_x_coord_x, i)
-            canvas = torch.cat([cur_canvas[:, :, :patch_size_y // 2, :canvas.shape[3]], canvas], dim=2)
-            if is_odd_y:
-                canvas = torch.cat([canvas, cur_canvas[:, :, -patch_size_y // 2:, :canvas.shape[3]]], dim=2)
-            if not is_odd_x:
-                canvas = torch.cat([canvas, cur_canvas[:, :, :canvas.shape[2], -patch_size_x // 2:]], dim=3)
-            cur_canvas = canvas
-            idx += 1
-            if frame_dir is not None:
-                frame = crop(cur_canvas[:, :, patch_size_y // factor:-patch_size_y // factor,
-                             patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
-                save_img(frame[0], os.path.join(frame_dir, '%03d.jpg' % idx))
+        canvas = partial_render(cur_canvas, odd_y_even_x_coord_y, odd_y_even_x_coord_x)
+        canvas = torch.cat([cur_canvas[:, :, :patch_size_y // 2, :canvas.shape[3]], canvas], dim=2)
+        if is_odd_y:
+            canvas = torch.cat([canvas, cur_canvas[:, :, -patch_size_y // 2:, :canvas.shape[3]]], dim=2)
+        if not is_odd_x:
+            canvas = torch.cat([canvas, cur_canvas[:, :, :canvas.shape[2], -patch_size_x // 2:]], dim=3)
+        cur_canvas = canvas
 
     if even_idx_y.shape[0] > 0 and odd_idx_x.shape[0] > 0:
-        for i in range(s):
-            canvas = partial_render(cur_canvas, even_y_odd_x_coord_y, even_y_odd_x_coord_x, i)
-            canvas = torch.cat([cur_canvas[:, :, :canvas.shape[2], :patch_size_x // 2], canvas], dim=3)
-            if not is_odd_y:
-                canvas = torch.cat([canvas, cur_canvas[:, :, -patch_size_y // 2:, -canvas.shape[3]:]], dim=2)
-            if is_odd_x:
-                canvas = torch.cat([canvas, cur_canvas[:, :, :canvas.shape[2], -patch_size_x // 2:]], dim=3)
-            cur_canvas = canvas
-            idx += 1
-            if frame_dir is not None:
-                frame = crop(cur_canvas[:, :, patch_size_y // factor:-patch_size_y // factor,
-                             patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
-                save_img(frame[0], os.path.join(frame_dir, '%03d.jpg' % idx))
+        canvas = partial_render(cur_canvas, even_y_odd_x_coord_y, even_y_odd_x_coord_x)
+        canvas = torch.cat([cur_canvas[:, :, :canvas.shape[2], :patch_size_x // 2], canvas], dim=3)
+        if not is_odd_y:
+            canvas = torch.cat([canvas, cur_canvas[:, :, -patch_size_y // 2:, -canvas.shape[3]:]], dim=2)
+        if is_odd_x:
+            canvas = torch.cat([canvas, cur_canvas[:, :, :canvas.shape[2], -patch_size_x // 2:]], dim=3)
+        cur_canvas = canvas
 
     cur_canvas = cur_canvas[:, :, patch_size_y // 4:-patch_size_y // 4, patch_size_x // 4:-patch_size_x // 4]
 
@@ -337,11 +311,10 @@ def main(input_path, model_path, output_dir, resize_h=None, resize_w=None):
             param[..., :2] = param[..., :2] / 2 + 0.25
             param[..., 2:4] = param[..., 2:4] / 2
 
-            strokes.append((param, decision, meta_brushes, final_result,
-                            frame_dir, False, original_h, original_w))
-            final_result = param2img_serial(param, decision, meta_brushes, final_result,
-                                        frame_dir, False, original_h, original_w)
-
+            # NOTE: save strokes
+            strokes.append((param, decision, meta_brushes, final_result))
+            final_result = param2img_parallel(
+                param, decision, meta_brushes, final_result)
 
         border_size = original_img_pad_size // (2 * patch_num)
         img = F.interpolate(original_img_pad, (patch_size * (2 ** layer), patch_size * (2 ** layer)))
@@ -392,19 +365,17 @@ def main(input_path, model_path, output_dir, resize_h=None, resize_w=None):
         param[..., :2] = param[..., :2] / 2 + 0.25
         param[..., 2:4] = param[..., 2:4] / 2
 
-        strokes.append((param, decision, meta_brushes, final_result,
-                        frame_dir, True, original_h, original_w))
-        final_result = param2img_serial(param, decision, meta_brushes, final_result,
-                                        frame_dir, True, original_h, original_w)
+        # NOTE: save strokes
+        strokes.append((param, decision, meta_brushes, final_result))
+        final_result = param2img_parallel(
+            param, decision, meta_brushes, final_result)
 
         final_result = final_result[:, :, border_size:-border_size, border_size:-border_size]
 
         final_result = crop(final_result, original_h, original_w)
         save_img(final_result[0], output_path)
 
-        with open("strokes.pkl", "wb") as f:
-            pickle.dump(strokes, f)
-
+        pickle.dump(strokes, open("strokes.pkl", "wb"))
 
 
 if __name__ == '__main__':
