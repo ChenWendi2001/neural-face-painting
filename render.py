@@ -8,8 +8,34 @@ import torch.nn.functional as F
 from PIL import Image
 from torch import Tensor
 from tqdm import tqdm
+import argparse
 
 import morphology
+from painter import Painter
+
+
+parser = argparse.ArgumentParser(description='STYLIZED NEURAL PAINTING')
+parser.add_argument('--renderer', type=str, default='oilpaintbrush', metavar='str',
+                    help='renderer: [watercolor, markerpen, oilpaintbrush, rectangle (default oilpaintbrush)')
+parser.add_argument('--transfer_mode', type=int, default=1, metavar='N',
+                    help='style transfer mode, 0: transfer color only, 1: transfer both color and texture, '
+                         'defalt: 1')
+parser.add_argument('--canvas_color', type=str, default='black', metavar='str',
+                    help='canvas_color: [black, white] (default black)')
+parser.add_argument('--canvas_size', type=int, default=512, metavar='str',
+                    help='size of the canvas for stroke rendering')
+parser.add_argument('--keep_aspect_ratio', action='store_true', default=False,
+                    help='keep input aspect ratio when saving outputs')
+parser.add_argument('--beta_L1', type=float, default=1.0,
+                    help='weight for L1 loss (default: 1.0)')
+parser.add_argument('--net_G', type=str, default='zou-fusion-net-light', metavar='str',
+                    help='net_G: plain-dcgan, plain-unet, huang-net, zou-fusion-net, '
+                         'or zou-fusion-net-light (default: zou-fusion-net-light)')
+parser.add_argument('--renderer_checkpoint_dir', type=str, default=r'./checkpoints_G_oilpaintbrush_light', metavar='str',
+                    help='dir to load neu-renderer (default: ./checkpoints_G_oilpaintbrush_light)')
+args = parser.parse_args()
+
+painter = Painter(args)
 
 
 def save_img(img, output_path):
@@ -34,6 +60,12 @@ def param2stroke(param, H, W, meta_brushes):
         alphas: a tensor with shape n_strokes x 3 x H x W,
          containing binary information of whether a pixel is belonging to the stroke (alpha mat), for painting process.
     """
+    # global painter
+    foreground, alphas = painter.render(param)
+    foreground = F.interpolate(foreground, (H, W))
+    alphas = F.interpolate(alphas, (H, W))
+    return foreground.to(torch.float16), alphas.to(torch.float16)
+
     # Firstly, resize the meta brushes to the required shape,
     # in order to decrease GPU memory especially when the required shape is small.
     meta_brushes_resize = F.interpolate(meta_brushes, (H, W))
