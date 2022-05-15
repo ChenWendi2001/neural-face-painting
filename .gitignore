@@ -3,4 +3,5 @@ input
 output
 *.pth
 *.pkl
+*.pt
 checkpoints

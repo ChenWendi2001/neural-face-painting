@@ -3,15 +3,42 @@ import pickle
 from turtle import forward
 from typing import List, Tuple
 
-import numpy as np
 import torch
 from torch import nn
 import torch.nn.functional as F
-from PIL import Image
 from torch import Tensor
-from tqdm import tqdm
 
-import morphology
+import numpy as np
+from PIL import Image
+
+from tqdm import tqdm
+import argparse
+
+from psuedo_render.painter import Painter
+
+
+parser = argparse.ArgumentParser(description='STYLIZED NEURAL PAINTING')
+parser.add_argument('--renderer', type=str, default='oilpaintbrush', metavar='str',
+                    help='renderer: [watercolor, markerpen, oilpaintbrush, rectangle (default oilpaintbrush)')
+parser.add_argument('--transfer_mode', type=int, default=1, metavar='N',
+                    help='style transfer mode, 0: transfer color only, 1: transfer both color and texture, '
+                         'defalt: 1')
+parser.add_argument('--canvas_color', type=str, default='black', metavar='str',
+                    help='canvas_color: [black, white] (default black)')
+parser.add_argument('--canvas_size', type=int, default=512, metavar='str',
+                    help='size of the canvas for stroke rendering')
+parser.add_argument('--keep_aspect_ratio', action='store_true', default=False,
+                    help='keep input aspect ratio when saving outputs')
+parser.add_argument('--beta_L1', type=float, default=1.0,
+                    help='weight for L1 loss (default: 1.0)')
+parser.add_argument('--net_G', type=str, default='zou-fusion-net-light', metavar='str',
+                    help='net_G: plain-dcgan, plain-unet, huang-net, zou-fusion-net, '
+                         'or zou-fusion-net-light (default: zou-fusion-net-light)')
+parser.add_argument('--renderer_checkpoint_dir', type=str, default=r'checkpoints_G_oilpaintbrush_light', metavar='str',
+                    help='dir to load neu-renderer (default: ./checkpoints_G_oilpaintbrush_light)')
+args = parser.parse_args(args=[])
+
+painter = Painter(args)
 
 
 def save_img(img, output_path):
@@ -36,57 +63,12 @@ def param2stroke(param, H, W, meta_brushes):
         alphas: a tensor with shape n_strokes x 3 x H x W,
          containing binary information of whether a pixel is belonging to the stroke (alpha mat), for painting process.
     """
-    # Firstly, resize the meta brushes to the required shape,
-    # in order to decrease GPU memory especially when the required shape is small.
-    meta_brushes_resize = F.interpolate(meta_brushes, (H, W))
-    b = param.shape[0]
-    # Extract shape parameters and color parameters.
-    param_list = torch.split(param, 1, dim=1)
-    x0, y0, w, h, theta = [item.squeeze(-1) for item in param_list[:5]]
-    R, G, B = param_list[5:]
-    # Pre-compute sin theta and cos theta
-    sin_theta = torch.sin(torch.acos(
-        torch.tensor(-1., device=param.device)) * theta)
-    cos_theta = torch.cos(torch.acos(
-        torch.tensor(-1., device=param.device)) * theta)
-    # index means each stroke should use which meta stroke? Vertical meta stroke or horizontal meta stroke.
-    # When h > w, vertical stroke should be used. When h <= w, horizontal stroke should be used.
-    index = torch.full((b,), -1, device=param.device, dtype=torch.long)
-    index[h > w] = 0
-    index[h <= w] = 1
-    brush = meta_brushes_resize[index.long()]
+    # global painter
+    foreground, alphas = painter.render(param)
+    foreground = F.interpolate(foreground, (H, W))
+    alphas = F.interpolate(alphas, (H, W))
+    return foreground.to(torch.float32), alphas.to(torch.float32)
 
-    # Calculate warp matrix according to the rules defined by pytorch, in order for warping.
-    warp_00 = cos_theta / w
-    warp_01 = sin_theta * H / (W * w)
-    warp_02 = (1 - 2 * x0) * cos_theta / w + \
-        (1 - 2 * y0) * sin_theta * H / (W * w)
-    warp_10 = -sin_theta * W / (H * h)
-    warp_11 = cos_theta / h
-    warp_12 = (1 - 2 * y0) * cos_theta / h - \
-        (1 - 2 * x0) * sin_theta * W / (H * h)
-    warp_0 = torch.stack([warp_00, warp_01, warp_02], dim=1)
-    warp_1 = torch.stack([warp_10, warp_11, warp_12], dim=1)
-    warp = torch.stack([warp_0, warp_1], dim=1)
-    # Conduct warping.
-    brush = F.grid_sample(
-        brush, F.affine_grid(warp, [b, 3, H, W],
-                             align_corners=False), align_corners=False)
-    # alphas is the binary information suggesting whether a pixel is belonging to the stroke.
-    # Dilation and erosion are used for foregrounds and alphas respectively to prevent artifacts on stroke borders.
-    # print(torch.cuda.memory_summary())
-    alphas = morphology.erosion(
-        (brush > 0).to(torch.float32).repeat(1, 3, 1, 1))
-    # print(torch.cuda.memory_summary())
-    # Give color to foreground strokes.
-    # color_map = torch.cat(
-    #     [R, G, B], dim=1).view(8, 3, 1, 1).repeat(1, 1, H, W)
-    # Dilation and erosion are used for foregrounds and alphas respectively to prevent artifacts on stroke borders.
-    foreground = morphology.dilation(
-        brush.repeat(1, 3, 1, 1) * torch.cat(
-            [R, G, B], dim=1).unsqueeze(-1).unsqueeze(-1).repeat(1, 1, H, W))
-    # print(torch.cuda.memory_summary())
-    return foreground, alphas
 
 
 def param2img_parallel(param, decision, meta_brushes, cur_canvas):
@@ -263,6 +245,49 @@ def crop(img, h, w):
               pad_w:W - pad_w - remainder_w]
     return img
 
+
+class Render(nn.Module):
+    def __init__(self, strokes):
+        super().__init__()
+        self.patch_size = 32
+        self.original_h = 512
+        self.original_w = 512
+        self.K = max(math.ceil(math.log2(max(self.original_h, self.original_w) / self.patch_size)), 0)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.params = [p for p,d in strokes]
+        self.decision = [d for p,d in strokes]
+
+        brush_large_vertical = read_img(
+            'brush/brush_large_vertical.png', 'L').to(self.device)
+        brush_large_horizontal = read_img(
+            'brush/brush_large_horizontal.png', 'L').to(self.device)
+        self.meta_brushes = torch.cat(
+            [brush_large_vertical, brush_large_horizontal], dim=0)
+
+    def forward(self, params):
+        original_img_pad_size = self.patch_size * (2 ** self.K)
+        final_result = torch.zeros(
+            (1, 3, original_img_pad_size, original_img_pad_size)).to(self.device)
+        for layer in range(0, self.K + 1):
+            param, decision = params[layer](), self.decision[layer]
+            final_result = param2img_parallel(
+                param, decision, self.meta_brushes, final_result)
+            # print(final_result.mean())
+
+        layer_size = self.patch_size * (2 ** self.K)
+        # There are patch_num * patch_num patches in total
+        patch_num = (layer_size - self.patch_size) // self.patch_size + 1
+        border_size = original_img_pad_size // (2 * patch_num)
+        final_result = F.pad(
+            final_result, [border_size, border_size, border_size, border_size, 0, 0, 0, 0])
+        param, decision = params[-1](), self.decision[-1]
+        final_result = param2img_parallel(
+            param, decision, self.meta_brushes, final_result)
+        final_result = final_result[:, :, border_size:-
+                                    border_size, border_size:-border_size]
+        final_result = crop(final_result, self.original_h, self.original_w)
+        return final_result[0]
+
 class Stroke(nn.Module):
     def __init__(self, stroke):
         super().__init__()
@@ -282,53 +307,7 @@ class Strokes(nn.Module):
     def forward(self):
         return self.strokes
 
-class Render(nn.Module):
-    def __init__(self, strokes):
-        super().__init__()
-        self.patch_size = 32
-        self.original_h = 512
-        self.original_w = 512
-        self.K = max(math.ceil(math.log2(max(self.original_h, self.original_w) / self.patch_size)), 0)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.params = [p for p,d in strokes]
-        self.decision = [d for p,d in strokes]
-
-        brush_large_vertical = read_img(
-            'brush/brush_large_vertical.png', 'L').to(self.device)
-        brush_large_horizontal = read_img(
-            'brush/brush_large_horizontal.png', 'L').to(self.device)
-        self.meta_brushes = torch.cat(
-            [brush_large_vertical, brush_large_horizontal], dim=0)
-        
-
-    def forward(self, params):     
-
-        original_img_pad_size = self.patch_size * (2 ** self.K)
-        final_result = torch.zeros(
-            (1, 3, original_img_pad_size, original_img_pad_size)).to(self.device)
-        # print(f"[INFO]: {self.K + 1} layers")
-        for layer in range(0, self.K + 1):
-            param, decision = params[layer]() ,self.decision[layer]
-            final_result = param2img_parallel(
-                param, decision, self.meta_brushes, final_result)
-            # print(final_result.mean())
-
-        layer_size = self.patch_size * (2 ** self.K)
-        # There are patch_num * patch_num patches in total
-        patch_num = (layer_size - self.patch_size) // self.patch_size + 1
-        border_size = original_img_pad_size // (2 * patch_num)
-        final_result = F.pad(
-            final_result, [border_size, border_size, border_size, border_size, 0, 0, 0, 0])
-        param, decision = params[-1]() ,self.decision[-1]
-        final_result = param2img_parallel(
-            param, decision, self.meta_brushes, final_result)
-        final_result = final_result[:, :, border_size:-
-                                    border_size, border_size:-border_size]
-        final_result = crop(final_result, self.original_h, self.original_w)
-        return final_result[0]
-
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     strokes: List[Tuple[Tensor, Tensor]] = \
         pickle.load(open("strokes.pkl", "rb"))
     r = Render(strokes)
