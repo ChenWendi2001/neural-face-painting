@@ -1,4 +1,7 @@
 __pycache__
 input
 output
-model.pth
+*.pth
+*.pkl
+*.pt
+checkpoints
