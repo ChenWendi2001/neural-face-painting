@@ -14,7 +14,7 @@ from PIL import Image
 from tqdm import tqdm
 import argparse
 
-from psuedo_render.painter import Painter
+from pseudo_render.painter import Painter
 
 
 parser = argparse.ArgumentParser(description='STYLIZED NEURAL PAINTING')
@@ -92,7 +92,7 @@ def param2img_parallel(param, decision, meta_brushes, cur_canvas):
     # param: b, h, w, stroke_per_patch, param_per_stroke
     # decision: b, h, w, stroke_per_patch
     b, h, w, s, _ = param.shape
-    param = param.view(-1, 8).contiguous()
+    param = param.view(-1, 12).contiguous()
     decision = decision.view(-1).contiguous().bool()
     H, W = cur_canvas.shape[-2:]
     is_odd_y = h % 2 == 1
