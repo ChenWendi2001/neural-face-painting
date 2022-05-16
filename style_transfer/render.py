@@ -1,5 +1,6 @@
 import math
 import pickle
+from tracemalloc import stop
 from turtle import forward
 from typing import List, Tuple
 
@@ -43,7 +44,7 @@ def param2stroke(param, H, W, meta_brushes):
     # Extract shape parameters and color parameters.
     param_list = torch.split(param, 1, dim=1)
     x0, y0, w, h, theta = [item.squeeze(-1) for item in param_list[:5]]
-    R, G, B = param_list[5:]
+    R0, G0, B0, R2, G2, B2, _ = param_list[5:]
     # Pre-compute sin theta and cos theta
     sin_theta = torch.sin(torch.acos(
         torch.tensor(-1., device=param.device)) * theta)
@@ -55,6 +56,10 @@ def param2stroke(param, H, W, meta_brushes):
     index[h > w] = 0
     index[h <= w] = 1
     brush = meta_brushes_resize[index.long()]
+
+    t = torch.arange(0, brush.shape[2], device=param.device).unsqueeze(0) / brush.shape[2]
+    color_map = torch.stack([R0 * (1 - t) + R2 * t, G0 * (1 - t) + G2 * t, B0 * (1 - t) + B2 * t], dim=1)
+    color_map = color_map.unsqueeze(-1).repeat(1, 1, 1, brush.shape[3])
 
     # Calculate warp matrix according to the rules defined by pytorch, in order for warping.
     warp_00 = cos_theta / w
@@ -83,8 +88,7 @@ def param2stroke(param, H, W, meta_brushes):
     #     [R, G, B], dim=1).view(8, 3, 1, 1).repeat(1, 1, H, W)
     # Dilation and erosion are used for foregrounds and alphas respectively to prevent artifacts on stroke borders.
     foreground = morphology.dilation(
-        brush.repeat(1, 3, 1, 1) * torch.cat(
-            [R, G, B], dim=1).unsqueeze(-1).unsqueeze(-1).repeat(1, 1, H, W))
+        brush.repeat(1, 3, 1, 1) * color_map)
     # print(torch.cuda.memory_summary())
     return foreground, alphas
 
@@ -110,7 +114,7 @@ def param2img_parallel(param, decision, meta_brushes, cur_canvas):
     # param: b, h, w, stroke_per_patch, param_per_stroke
     # decision: b, h, w, stroke_per_patch
     b, h, w, s, _ = param.shape
-    param = param.view(-1, 8).contiguous()
+    param = param.view(-1, 12).contiguous()
     decision = decision.view(-1).contiguous().bool()
     H, W = cur_canvas.shape[-2:]
     is_odd_y = h % 2 == 1
@@ -266,6 +270,11 @@ def crop(img, h, w):
 class Stroke(nn.Module):
     def __init__(self, stroke):
         super().__init__()
+        print(stroke.shape)
+        stroke = F.pad(stroke, pad=[0, 4, 0, 0])
+        print(stroke.shape)
+        stroke[..., -4:-1] = stroke[..., -7:-4]
+        stroke[...,-1] = 0
         self.stroke = nn.Parameter(stroke)
     
     def forward(self):

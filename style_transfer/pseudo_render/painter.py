@@ -3,9 +3,9 @@ import os
 import torch
 import torch.nn.functional as F
 
-from psuedo_render.morphology import *
-from psuedo_render.renderer import *
-from psuedo_render.networks import define_G
+from pseudo_render.morphology import *
+from pseudo_render.renderer import *
+from pseudo_render.networks import define_G
 
 class Painter():
     def __init__(self, args):
@@ -19,7 +19,7 @@ class Painter():
         self.loadCheckpoint()
 
     def loadCheckpoint(self):
-        path = os.path.join(os.getcwd(), "psuedo_render",self.renderer_checkpoint_dir,
+        path = os.path.join(os.getcwd(), "pseudo_render",self.renderer_checkpoint_dir,
              'last_ckpt.pt')
         if os.path.exists(path):
             print('loading renderer from pre-trained checkpoint...')
@@ -32,7 +32,7 @@ class Painter():
             self.net_G.eval()
 
     def render(self, stroke):
-        stroke = F.pad(stroke, pad=[0, 4, 0, 0])
+        # stroke = F.pad(stroke, pad=[0, 4, 0, 0])
         G_pred_foregrounds, G_pred_alphas = \
             self.net_G(stroke.unsqueeze(-1).unsqueeze(-1).float())
         G_pred_foregrounds = Dilation2d()(G_pred_foregrounds)
