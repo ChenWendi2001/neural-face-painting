@@ -363,7 +363,7 @@ def main(input_path, model_path, output_dir, resize_h=None, resize_w=None):
         # stroke_param: b * h * w, stroke_per_patch, param_per_stroke
         # stroke_decision: b * h * w, stroke_per_patch, 1
         param = stroke_param.view(1, h, w, stroke_num, 8).contiguous()
-        decision = stroke_decision.view(1, h, w, stroke_num).contiguous().bool()
+        decision = stroke_decision.view(1, h, w, stroke_num).contiguous() > 0
         # param: b, h, w, stroke_per_patch, 8
         # decision: b, h, w, stroke_per_patch
         param[..., :2] = param[..., :2] / 2 + 0.25
