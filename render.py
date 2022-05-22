@@ -64,7 +64,7 @@ def param2stroke(param, H, W, meta_brushes):
     foreground, alphas = painter.render(param)
     foreground = F.interpolate(foreground, (H, W))
     alphas = F.interpolate(alphas, (H, W))
-    return foreground.to(torch.float16), alphas.to(torch.float16)
+    return foreground.to(torch.float32), alphas.to(torch.float32)
 
     # Firstly, resize the meta brushes to the required shape,
     # in order to decrease GPU memory especially when the required shape is small.
@@ -106,7 +106,7 @@ def param2stroke(param, H, W, meta_brushes):
     # Dilation and erosion are used for foregrounds and alphas respectively to prevent artifacts on stroke borders.
     # print(torch.cuda.memory_summary())
     alphas = morphology.erosion(
-        (brush > 0).to(torch.float16).repeat(1, 3, 1, 1))
+        (brush > 0).to(torch.float32).repeat(1, 3, 1, 1))
     # print(torch.cuda.memory_summary())
     # Give color to foreground strokes.
     # color_map = torch.cat(
@@ -163,10 +163,10 @@ def param2img_parallel(param, decision, meta_brushes, cur_canvas):
                                     patch_size_y // 4, patch_size_y // 4, 0, 0, 0, 0])
     foregrounds = torch.zeros(
         param.shape[0], 3, patch_size_y, patch_size_x,
-        dtype=torch.float16, device=cur_canvas.device)
+        dtype=torch.float32, device=cur_canvas.device)
     alphas = torch.zeros(
         param.shape[0], 3, patch_size_y, patch_size_x,
-        dtype=torch.float16, device=cur_canvas.device)
+        dtype=torch.float32, device=cur_canvas.device)
     # print(torch.cuda.memory_summary())
     valid_foregrounds, valid_alphas = param2stroke(
         param[decision, :], patch_size_y, patch_size_x, meta_brushes)
@@ -278,7 +278,7 @@ def read_img(img_path, img_type='RGB', h=None, w=None):
     img = np.array(img)
     if img.ndim == 2:
         img = np.expand_dims(img, axis=-1)
-    img = img.transpose((2, 0, 1)).astype(np.float16) / 255
+    img = img.transpose((2, 0, 1)).astype(np.float32) / 255
     img = torch.from_numpy(img).unsqueeze(0)
     return img
 
