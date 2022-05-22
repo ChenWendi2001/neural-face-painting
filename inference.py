@@ -386,5 +386,5 @@ if __name__ == '__main__':
     main(input_path='./input/bingbing.jpg',
          model_path='./model.pth',
          output_dir='./output/',
-         resize_h=1024,         # resize original input to this size. None means do not resize.
-         resize_w=1024)         # resize original input to this size. None means do not resize.
+         resize_h=512,         # resize original input to this size. None means do not resize.
+         resize_w=512)         # resize original input to this size. None means do not resize.
