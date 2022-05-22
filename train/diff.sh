@@ -1,5 +1,5 @@
 python train.py \
---name painter \
+--name diffpainter \
 --gpu_ids 5 \
 --model diffpainter \
 --dataset_mode null \
