@@ -25,7 +25,7 @@ parser.add_argument('--transfer_mode', type=int, default=1, metavar='N',
                          'defalt: 1')
 parser.add_argument('--canvas_color', type=str, default='black', metavar='str',
                     help='canvas_color: [black, white] (default black)')
-parser.add_argument('--canvas_size', type=int, default=512, metavar='str',
+parser.add_argument('--canvas_size', type=int, default=1024, metavar='str',
                     help='size of the canvas for stroke rendering')
 parser.add_argument('--keep_aspect_ratio', action='store_true', default=False,
                     help='keep input aspect ratio when saving outputs')
@@ -250,8 +250,8 @@ class Render(nn.Module):
     def __init__(self, strokes):
         super().__init__()
         self.patch_size = 32
-        self.original_h = 512
-        self.original_w = 512
+        self.original_h = 1024
+        self.original_w = 1024
         self.K = max(math.ceil(math.log2(max(self.original_h, self.original_w) / self.patch_size)), 0)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.params = [p for p,d in strokes]

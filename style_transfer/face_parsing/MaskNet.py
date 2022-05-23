@@ -1,6 +1,5 @@
 
 import os
-from regex import D
 import torch
 import datetime
 import numpy as np
@@ -35,7 +34,11 @@ def transformer(resize, totensor, normalize, centercrop, imsize):
 class MaskNet(object):
     def __init__(self, imsize):
         self.version = "parsenet"
+<<<<<<< HEAD
         self.imsize = imsize
+=======
+        self.imsize = 1024
+>>>>>>> 64780aaa274360b6fa644078274632522822ff4c
         self.pretrained_model = True
         self.model_name = "model.pth"
         
