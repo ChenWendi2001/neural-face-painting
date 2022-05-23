@@ -33,9 +33,9 @@ def transformer(resize, totensor, normalize, centercrop, imsize):
     return transform
 
 class MaskNet(object):
-    def __init__(self):
+    def __init__(self, imsize):
         self.version = "parsenet"
-        self.imsize = 512
+        self.imsize = imsize
         self.pretrained_model = True
         self.model_name = "model.pth"
         

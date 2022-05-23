@@ -103,10 +103,10 @@ from  face_parsing.MaskNet import MaskNet
 from face_parsing.utils import generate_label, generate_label_plain, cross_entropy2d
 
 use_mask = True
-mask_loss_lambda = 1e10
+mask_loss_lambda = 1e9
 
 if use_mask:
-    img2mask = MaskNet()
+    img2mask = MaskNet(img_size)
     label = torch.tensor(generate_label_plain(img2mask.pred(postp_gpu(content_image.squeeze(0))), img_size)).cuda()
 
 
