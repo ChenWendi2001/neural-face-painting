@@ -295,8 +295,8 @@ class Render(nn.Module):
     def __init__(self, strokes):
         super().__init__()
         self.patch_size = 32
-        self.original_h = 512
-        self.original_w = 512
+        self.original_h = 1024
+        self.original_w = 1024
         self.K = max(math.ceil(math.log2(max(self.original_h, self.original_w) / self.patch_size)), 0)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.params = [p for p,d in strokes]
