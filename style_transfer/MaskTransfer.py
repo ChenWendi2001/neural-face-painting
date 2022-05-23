@@ -19,7 +19,7 @@ from PIL import Image
 from collections import OrderedDict
 
 # pre and post processing for images
-img_size = 512
+img_size = 1024
 prep = transforms.Compose([transforms.Resize([img_size, img_size]),
                            transforms.ToTensor(),
                            transforms.Lambda(lambda x: x[torch.LongTensor([2,1,0])]), #turn to BGR
@@ -54,7 +54,7 @@ def postp_gpu(tensor):
 
 #load images, ordered as [style_image, content_image]
 img_dirs = [image_dir, image_dir]
-img_names = ['mosaic.jpg', '0.jpg']
+img_names = ['mosaic.jpg', 'bingbing.jpg']
 imgs = [Image.open(img_dirs[i] + name) for i,name in enumerate(img_names)]
 imgs_torch = [prep(img) for img in imgs]
 if torch.cuda.is_available():
