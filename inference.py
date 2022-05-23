@@ -316,8 +316,9 @@ def main(input_path, model_path, output_dir, resize_h=None, resize_w=None):
 
             # NOTE: save strokes
             strokes.append((param, decision))
-            final_result = param2img_parallel(
-                param, decision, meta_brushes, final_result)
+            if layer >= K - 2:
+                final_result = param2img_parallel(
+                    param, decision, meta_brushes, final_result)
             # print(final_result.mean())
 
         border_size = original_img_pad_size // (2 * patch_num)
@@ -386,5 +387,5 @@ if __name__ == '__main__':
     main(input_path='./input/bingbing.jpg',
          model_path='./model.pth',
          output_dir='./output/',
-         resize_h=512,         # resize original input to this size. None means do not resize.
-         resize_w=512)         # resize original input to this size. None means do not resize.
+         resize_h=1024,         # resize original input to this size. None means do not resize.
+         resize_w=1024)         # resize original input to this size. None means do not resize.
