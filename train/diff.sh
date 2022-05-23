@@ -1,7 +1,7 @@
 python train.py \
---name painter \
---gpu_ids 0 \
---model painter \
+--name diffpainter \
+--gpu_ids 5 \
+--model diffpainter \
 --dataset_mode null \
 --batch_size 64 \
 --display_freq 25 \
