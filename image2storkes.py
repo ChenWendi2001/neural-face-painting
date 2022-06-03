@@ -28,7 +28,7 @@ if __name__ == '__main__':
     else:
         main(
             input_path = opt.input_path,
-            model_path = os.path.join(opt.model_path, "stroke_model.pth"),
+            model_path = os.path.join(opt.model_dir, "stroke_model.pth"),
             output_dir = os.path.join(opt.output_dir, image_name),
             resize_h = opt.image_h,
             resize_w = opt.image_w
