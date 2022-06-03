@@ -151,4 +151,4 @@ while n_iter[0] <= max_iter:
 
 #display result
 out_img = postp(prep_render(render(strokes())).cpu())
-out_img.save(os.path.join(opt.output_dir, image_name, "3-final-%s-%d-%f-%f-%f.jpg" % (style_name, max_iter, math.log(mask_loss_lambda) / math.log(10), math.log(content_loss_lambda) / math.log(10), lr)))
+out_img.save(os.path.join(opt.output_dir, image_name, "3-final-%s-%s-%d-%f-%f-%f.jpg" % (style_name, "mask" if use_mask else "no_mask", max_iter, math.log(mask_loss_lambda) / math.log(10), math.log(content_loss_lambda) / math.log(10), lr)))
