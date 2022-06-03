@@ -12,6 +12,7 @@ from torch import optim
 from style_transfer.render import Render, Strokes
 from pseudo_render import pseudo_render
 import pickle
+import math
 
 
 from style_transfer.loss import VGGStyleLoss, PixelLoss
@@ -103,6 +104,8 @@ l1 = PixelLoss()
 
 use_mask = opt.use_mask
 mask_loss_lambda = opt.mask_loss_lambda
+content_loss_lambda = opt.content_loss_lambda
+lr_decay = opt.lr_decay
 
 if use_mask:
     img2mask = MaskNet(img_size_w, img_size_h)
@@ -127,12 +130,17 @@ while n_iter[0] <= max_iter:
             out_img_pseudo = postp_gpu(pseudo_render_result.squeeze(0))
             predict = img2mask.pred(out_img_pseudo)
             mask_loss = cross_entropy2d(predict, label)
-        loss = mask_loss * mask_loss_lambda + style_loss * 0.5 + content_loss
+
+        for params in optimizer.param_groups:                      
+                params['lr'] *= lr_decay
+        loss = mask_loss * mask_loss_lambda + style_loss * 0.5 + content_loss * content_loss_lambda
+
+
         loss.backward()
         n_iter[0]+=1
         #print loss
-        if n_iter[0]%show_iter == (show_iter-1):
-            print('Iteration: %d, loss: %f, style loss %f, mask loss %f'%(n_iter[0]+1, loss.item(), style_loss, mask_loss.item()))
+        if (n_iter[0] - 1) % show_iter == 0:
+            print('Iteration: %d, loss: %f, style loss %f, mask loss %f, content loss %f'%(n_iter[0], loss.item(), style_loss, mask_loss.item(), content_loss.item()))
             out_img = postp(prep_render(render(strokes())).cpu())
             out_img.save(os.path.join(opt.output_dir, image_name, "temp", "3-final-" + str(n_iter[0]) + ".jpg"))
 
@@ -143,4 +151,4 @@ while n_iter[0] <= max_iter:
 
 #display result
 out_img = postp(prep_render(render(strokes())).cpu())
-out_img.save(os.path.join(opt.output_dir, image_name, "3-final-%s-%f-%f-%f.jpg" % (os.path.basename(opt.style_path),max_iter, mask_loss_lambda, lr)))
+out_img.save(os.path.join(opt.output_dir, image_name, "3-final-%s-%d-%f-%f-%f.jpg" % (style_name, max_iter, math.log(mask_loss_lambda) / math.log(10), math.log(content_loss_lambda) / math.log(10), lr)))

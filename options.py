@@ -20,9 +20,11 @@ class Options():
             parser.add_argument("--style_path", required=True)
             parser.add_argument("--max_iter", type=int, default=200)
             parser.add_argument("--show_freq", type=int, default=5)
-            parser.add_argument("--lr", type=float, default=0.002)
+            parser.add_argument("--lr", type=float, default=0.02)
             parser.add_argument("--use_mask", action="store_true")
             parser.add_argument("--mask_loss_lambda", type=float, default=1e9)
+            parser.add_argument("--content_loss_lambda", type=float, default=1e5)
+            parser.add_argument("--lr_decay", type=float, default=0.9995)
         self.initialize = True
         return parser
 
