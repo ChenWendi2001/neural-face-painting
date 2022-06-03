@@ -2,6 +2,7 @@ import numpy as np
 import cv2
 import random
 from . import utils
+import os
 
 __all__ = ["Renderer"]
 
@@ -43,13 +44,13 @@ class Renderer():
             self.d_color = 6
             self.d_alpha = 1
             self.brush_small_vertical = cv2.imread(
-                r'./brushes/brush_fromweb2_small_vertical.png', cv2.IMREAD_GRAYSCALE)
+                os.path.join(os.getcwd(), "pseudo_render", 'brushes', 'brush_fromweb2_small_vertical.png'), cv2.IMREAD_GRAYSCALE)
             self.brush_small_horizontal = cv2.imread(
-                r'./brushes/brush_fromweb2_small_horizontal.png', cv2.IMREAD_GRAYSCALE)
+                os.path.join(os.getcwd(), "pseudo_render", 'brushes', 'brush_fromweb2_small_horizontal.png'), cv2.IMREAD_GRAYSCALE)
             self.brush_large_vertical = cv2.imread(
-                r'./brushes/brush_fromweb2_large_vertical.png', cv2.IMREAD_GRAYSCALE)
+                os.path.join(os.getcwd(), "pseudo_render", 'brushes', 'brush_fromweb2_large_vertical.png'), cv2.IMREAD_GRAYSCALE)
             self.brush_large_horizontal = cv2.imread(
-                r'./brushes/brush_fromweb2_large_horizontal.png', cv2.IMREAD_GRAYSCALE)
+                os.path.join(os.getcwd(), "pseudo_render", 'brushes', 'brush_fromweb2_large_horizontal.png'), cv2.IMREAD_GRAYSCALE)
         elif self.renderer in ['rectangle']:
             self.d = 9 # xc, yc, w, h, theta, R, G, B, A
             self.d_shape = 5

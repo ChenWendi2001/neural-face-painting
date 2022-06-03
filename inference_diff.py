@@ -218,7 +218,7 @@ def main(input_path, model_path, output_dir, resize_h, resize_w, increasing_laye
                             'defalt: 1')
     parser.add_argument('--canvas_color', type=str, default='black', metavar='str',
                         help='canvas_color: [black, white] (default black)')
-    parser.add_argument('--canvas_size', type=int, default=1024, metavar='str',
+    parser.add_argument('--canvas_size', type=int, default=512, metavar='str',
                         help='size of the canvas for stroke rendering')
     parser.add_argument('--keep_aspect_ratio', action='store_true', default=False,
                         help='keep input aspect ratio when saving outputs')

@@ -23,6 +23,10 @@ opt = Options(type="style").parse()
 image_file = os.path.split(opt.input_path)[1]
 image_name = "".join(image_file.split(".")[:-1])
 
+style_file = os.path.basename(opt.style_path)
+style_name = "".join(style_file.split(".")[:-1])
+
+
 img_size_h = opt.image_h
 img_size_w = opt.image_w
 
@@ -118,7 +122,6 @@ while n_iter[0] <= max_iter:
         # loss += l1(render_result, content_image) * 1
         
         style_loss = style(pseudo_render_result, style_image) * 0.5
-        
         mask_loss = torch.tensor([0]).cuda()
         if use_mask:
             out_img_pseudo = postp_gpu(pseudo_render_result.squeeze(0))
@@ -140,4 +143,4 @@ while n_iter[0] <= max_iter:
 
 #display result
 out_img = postp(prep_render(render(strokes())).cpu())
-out_img.save(os.path.join(opt.output_dir, image_name, "3-final-%f-%f-%f.jpg" % (max_iter, mask_loss_lambda, lr)))
+out_img.save(os.path.join(opt.output_dir, image_name, "3-final-%s-%f-%f-%f.jpg" % (os.path.basename(opt.style_path),max_iter, mask_loss_lambda, lr)))
