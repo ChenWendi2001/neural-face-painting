@@ -119,6 +119,7 @@ while n_iter[0] <= max_iter:
         
         style_loss = style(pseudo_render_result, style_image) * 0.5
         
+        mask_loss = torch.tensor([0]).cuda()
         if use_mask:
             out_img_pseudo = postp_gpu(pseudo_render_result.squeeze(0))
             predict = img2mask.pred(out_img_pseudo)
