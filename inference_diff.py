@@ -207,7 +207,7 @@ def crop(img, h, w):
     return img
 
 
-def main(input_path, model_path, output_dir, resize_h=None, resize_w=None):
+def main(input_path, model_path, output_dir, resize_h, resize_w, increasing_layers):
 
 
     parser = argparse.ArgumentParser(description='STYLIZED NEURAL PAINTING')
@@ -309,7 +309,7 @@ def main(input_path, model_path, output_dir, resize_h=None, resize_w=None):
 
             # NOTE: save strokes
             strokes.append((param, decision))
-            if layer >= K - 2:
+            if layer >= K - increasing_layers:
                 final_result = param2img_parallel(
                     param, decision, meta_brushes, final_result, painter
                     )

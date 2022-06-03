@@ -6,7 +6,7 @@ download the [checkpoints](https://jbox.sjtu.edu.cn/l/R1nghh) and unzip it to th
 
 Generate strokes
 ```
-python ./image2storkes.py --input_path ./input/bingbing.jpg --output_dir ./output --use_neural_render
+python ./image2storkes.py --input_path ./input/bingbing.jpg --output_dir ./output --use_neural_render --strokes_increasing_layers 1
 ```
 
 Stylize strokes

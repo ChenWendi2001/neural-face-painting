@@ -15,6 +15,7 @@ class Options():
         parser.add_argument("--image_h", type=int, default=512)
         parser.add_argument("--image_w", type=int, default=512)
         parser.add_argument("--use_neural_render", action="store_true")
+        parser.add_argument("--strokes_increasing_layers", type=int, default=1)
         if self.type == "style":
             parser.add_argument("--style_path", required=True)
             parser.add_argument("--max_iter", type=int, default=200)

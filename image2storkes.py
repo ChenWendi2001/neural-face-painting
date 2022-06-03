@@ -23,7 +23,8 @@ if __name__ == '__main__':
             model_path = os.path.join(opt.model_dir, "diff_model.pth"),
             output_dir = os.path.join(opt.output_dir, image_name),
             resize_h = opt.image_h,
-            resize_w = opt.image_w
+            resize_w = opt.image_w,
+            increasing_layers=opt.strokes_increasing_layers
         )
     else:
         main(
@@ -31,6 +32,7 @@ if __name__ == '__main__':
             model_path = os.path.join(opt.model_dir, "stroke_model.pth"),
             output_dir = os.path.join(opt.output_dir, image_name),
             resize_h = opt.image_h,
-            resize_w = opt.image_w
+            resize_w = opt.image_w,
+            increasing_layers=opt.strokes_increasing_layers
         )
 
