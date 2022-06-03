@@ -3,6 +3,7 @@ import pickle
 from tracemalloc import stop
 from turtle import forward
 from typing import List, Tuple
+import os
 
 import numpy as np
 import torch
@@ -11,8 +12,8 @@ import torch.nn.functional as F
 from PIL import Image
 from torch import Tensor
 from tqdm import tqdm
+from . import morphology
 
-import morphology
 
 
 def save_img(img, output_path):
@@ -295,17 +296,17 @@ class Render(nn.Module):
     def __init__(self, strokes):
         super().__init__()
         self.patch_size = 32
-        self.original_h = 1024
-        self.original_w = 1024
+        self.original_h = 512
+        self.original_w = 512
         self.K = max(math.ceil(math.log2(max(self.original_h, self.original_w) / self.patch_size)), 0)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.params = [p for p,d in strokes]
         self.decision = [d for p,d in strokes]
 
-        brush_large_vertical = read_img(
-            'brush/brush_large_vertical.png', 'L').to(self.device)
-        brush_large_horizontal = read_img(
-            'brush/brush_large_horizontal.png', 'L').to(self.device)
+        brush_large_vertical = read_img( os.path.join(os.path.dirname(__file__),
+            'brush', "brush_large_vertical.png"), 'L').to(self.device)
+        brush_large_horizontal = read_img(os.path.join(os.path.dirname(__file__),
+            'brush', "brush_large_horizontal.png"), 'L').to(self.device)
         self.meta_brushes = torch.cat(
             [brush_large_vertical, brush_large_horizontal], dim=0)
         

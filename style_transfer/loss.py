@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torchvision
 import random
-import pytorch_batch_sinkhorn as spc
+from .pytorch_batch_sinkhorn import sinkhorn_normalized, sinkhorn_loss
 
 # Decide which device we want to run on
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -159,11 +159,11 @@ class SinkhornLoss(nn.Module):
         mass_x = img_1.reshape(batch_size, -1)
         mass_y = img_2.reshape(batch_size, -1)
         if self.normalize:
-            loss = spc.sinkhorn_normalized(
+            loss = sinkhorn_normalized(
                 canvas_grids, gt_grids, epsilon=self.epsilon, niter=self.niter,
                 mass_x=mass_x, mass_y=mass_y)
         else:
-            loss = spc.sinkhorn_loss(
+            loss =  sinkhorn_loss(
                 canvas_grids, gt_grids, epsilon=self.epsilon, niter=self.niter,
                 mass_x=mass_x, mass_y=mass_y)
 

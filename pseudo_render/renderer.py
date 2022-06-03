@@ -1,7 +1,7 @@
 import numpy as np
 import cv2
 import random
-import pseudo_render.utils
+from . import utils
 
 __all__ = ["Renderer"]
 

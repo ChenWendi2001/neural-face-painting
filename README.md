@@ -1,5 +1,12 @@
-# neural-face-painting
-Course Repo for CS238: Virtual Reality &amp; Augmented Display Technology, SJTU.
+# Differentiable Paint Transformer
+## Usage
 
-### Note
-This is a **dev repository**. You can add code by creating new branches. Please don't modify any file on the `main` branch without PRs.
+Generate strokes
+```
+python .\image2storkes.py --input_path ./input/bingbing.jpg --output_dir ./output --use_neural_render
+```
+
+Stylize strokes
+```
+ python .\strokes2stylized.py --input_path ./input/bingbing.jpg --output_dir ./output --use_mask --style_path ./input/mosaic.jpg
+```

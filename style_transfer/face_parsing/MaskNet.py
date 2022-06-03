@@ -22,7 +22,7 @@ def transformer(resize, totensor, normalize, centercrop, imsize):
     if centercrop:
         options.append(transforms.CenterCrop(160))
     if resize:
-        options.append(transforms.Resize((imsize,imsize), interpolation=PIL.Image.NEAREST))
+        options.append(transforms.Resize(imsize, interpolation=PIL.Image.NEAREST))
     if totensor:
         options.append(transforms.ToTensor())
     if normalize:
@@ -32,24 +32,19 @@ def transformer(resize, totensor, normalize, centercrop, imsize):
     return transform
 
 class MaskNet(object):
-    def __init__(self, imsize):
+    def __init__(self, imsize_w, imsize_h):
         self.version = "parsenet"
-<<<<<<< HEAD
-        self.imsize = imsize
-=======
-        self.imsize = 1024
->>>>>>> 64780aaa274360b6fa644078274632522822ff4c
+        self.imsize_w = imsize_w
+        self.imsize_h = imsize_h
         self.pretrained_model = True
-        self.model_name = "model.pth"
+        self.model_path = os.path.join(os.path.dirname(__file__), "..", "..", "checkpoints", "mask_model.pth")
         
-        self.model_save_path = os.path.join(os.path.dirname(__file__), "models")
-        
-        self.transform = transformer(True, False, True, False, self.imsize)
+        self.transform = transformer(True, False, True, False, (self.imsize_w, self.imsize_h))
         self.build_model()
     
     def build_model(self):
         self.G = unet().cuda()
-        self.G.load_state_dict(torch.load(os.path.join(self.model_save_path, self.version, self.model_name)))
+        self.G.load_state_dict(torch.load(self.model_path))
         
 
     def pred(self, img):
@@ -62,9 +57,6 @@ class MaskNet(object):
         img = img.cuda()
 
         labels_predict = self.G(img)
-        labels_predict_plain = generate_label_plain(labels_predict, self.imsize)
-        labels_predict_color = generate_label(labels_predict, self.imsize)
-
         return labels_predict
 
 

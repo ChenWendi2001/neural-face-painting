@@ -3,9 +3,9 @@ import os
 import torch
 import torch.nn.functional as F
 
-from pseudo_render.morphology import *
-from pseudo_render.renderer import *
-from pseudo_render.networks import define_G
+from .morphology import *
+from .renderer import *
+from .networks import define_G
 
 class Painter():
     def __init__(self, args):
@@ -19,7 +19,7 @@ class Painter():
         self.loadCheckpoint()
 
     def loadCheckpoint(self):
-        path = os.path.join(os.getcwd(), "pseudo_render",self.renderer_checkpoint_dir,
+        path = os.path.join(os.path.dirname(__file__), "..", "checkpoints",self.renderer_checkpoint_dir,
              'last_ckpt.pt')
         if os.path.exists(path):
             print('loading renderer from pre-trained checkpoint...')
