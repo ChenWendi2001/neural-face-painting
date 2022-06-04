@@ -26,8 +26,8 @@ if __name__ == '__main__':
             resize_w=opt.image_w,
             increasing_layers=opt.strokes_increasing_layers
         )
-        os.system(
-            f"mv ./output/{image_name}/strokes.pkl ./output/{image_name}/strokes_more.pkl")
+        os.rename(
+            f"./output/{image_name}/strokes.pkl", f"./output/{image_name}/strokes_more.pkl")
         main_diff(
             input_path=opt.input_path,
             model_path=os.path.join(opt.model_dir, "diff_model.pth"),
@@ -53,8 +53,8 @@ if __name__ == '__main__':
             resize_w=opt.image_w,
             increasing_layers=opt.strokes_increasing_layers
         )
-        os.system(
-            f"mv ./output/{image_name}/strokes.pkl ./output/{image_name}/strokes_more.pkl")
+        os.rename(
+            f"./output/{image_name}/strokes.pkl", f"./output/{image_name}/strokes_more.pkl")
         main(
             input_path=opt.input_path,
             model_path=os.path.join(opt.model_dir, "stroke_model.pth"),
