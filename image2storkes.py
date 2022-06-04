@@ -19,20 +19,55 @@ if __name__ == '__main__':
 
     if opt.use_neural_render:
         main_diff(
-            input_path = opt.input_path,
-            model_path = os.path.join(opt.model_dir, "diff_model.pth"),
-            output_dir = os.path.join(opt.output_dir, image_name),
-            resize_h = opt.image_h,
-            resize_w = opt.image_w,
+            input_path=opt.input_path,
+            model_path=os.path.join(opt.model_dir, "diff_model.pth"),
+            output_dir=os.path.join(opt.output_dir, image_name),
+            resize_h=opt.image_h,
+            resize_w=opt.image_w,
             increasing_layers=opt.strokes_increasing_layers
         )
+        os.system(
+            f"mv ./output/{image_name}/strokes.pkl ./output/{image_name}/strokes_more.pkl")
+        main_diff(
+            input_path=opt.input_path,
+            model_path=os.path.join(opt.model_dir, "diff_model.pth"),
+            output_dir=os.path.join(opt.output_dir, image_name),
+            resize_h=opt.image_h,
+            resize_w=opt.image_w,
+            increasing_layers=None
+        )
+        strokes = pickle.load(
+            open(f"./output/{image_name}/strokes_more.pkl", "rb"))
+        strokes_less = pickle.load(
+            open(f"./output/{image_name}/strokes.pkl", "rb"))
+        strokes[-1] = strokes_less[-1]
+        strokes[-2] = strokes_less[-2]
+        pickle.dump(
+            strokes, open(f"./output/{image_name}/strokes.pkl", "wb"))
     else:
         main(
-            input_path = opt.input_path,
-            model_path = os.path.join(opt.model_dir, "stroke_model.pth"),
-            output_dir = os.path.join(opt.output_dir, image_name),
-            resize_h = opt.image_h,
-            resize_w = opt.image_w,
+            input_path=opt.input_path,
+            model_path=os.path.join(opt.model_dir, "stroke_model.pth"),
+            output_dir=os.path.join(opt.output_dir, image_name),
+            resize_h=opt.image_h,
+            resize_w=opt.image_w,
             increasing_layers=opt.strokes_increasing_layers
         )
-
+        os.system(
+            f"mv ./output/{image_name}/strokes.pkl ./output/{image_name}/strokes_more.pkl")
+        main(
+            input_path=opt.input_path,
+            model_path=os.path.join(opt.model_dir, "stroke_model.pth"),
+            output_dir=os.path.join(opt.output_dir, image_name),
+            resize_h=opt.image_h,
+            resize_w=opt.image_w,
+            increasing_layers=None
+        )
+        strokes = pickle.load(
+            open(f"./output/{image_name}/strokes_more.pkl", "rb"))
+        strokes_less = pickle.load(
+            open(f"./output/{image_name}/strokes.pkl", "rb"))
+        strokes[-1] = strokes_less[-1]
+        strokes[-2] = strokes_less[-2]
+        pickle.dump(
+            strokes, open(f"./output/{image_name}/strokes.pkl", "wb"))

@@ -309,7 +309,8 @@ def main(input_path, model_path, output_dir, resize_h, resize_w, increasing_laye
 
             # NOTE: save strokes
             strokes.append((param, decision))
-            if layer >= K - increasing_layers:
+            if increasing_layers is not None \
+                and layer >= K - increasing_layers:
                 final_result = param2img_parallel(
                     param, decision, meta_brushes, final_result, painter
                     )
