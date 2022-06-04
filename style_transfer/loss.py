@@ -14,7 +14,7 @@ class PixelLoss(nn.Module):
         super(PixelLoss, self).__init__()
         self.p = p
 
-    def forward(self, canvas, gt, ignore_color=False):
+    def forward(self, canvas, gt, ignore_color=True):
         if ignore_color:
             canvas = torch.mean(canvas, dim=1)
             gt = torch.mean(gt, dim=1)
@@ -142,10 +142,10 @@ class SinkhornLoss(nn.Module):
     def forward(self, canvas, gt):
 
         batch_size, c, h, w = gt.shape
-        if h > 24:
-            canvas = nn.functional.interpolate(canvas, [24, 24], mode='area')
-            gt = nn.functional.interpolate(gt, [24, 24], mode='area')
-            batch_size, c, h, w = gt.shape
+        # if h > 24:
+        #     canvas = nn.functional.interpolate(canvas, [24, 24], mode='area')
+        #     gt = nn.functional.interpolate(gt, [24, 24], mode='area')
+        #     batch_size, c, h, w = gt.shape
 
         canvas_grids = self._mesh_grids(batch_size, h, w)
         gt_grids = torch.clone(canvas_grids)
